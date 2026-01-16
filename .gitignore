@@ -1,7 +1,6 @@
 venv/
 .vscode/
 *.txt
-!requirements.txt
 BofCS_Presentation Guidelines.md
 BofCS_WEEK10.md
 ML group.md
