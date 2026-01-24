@@ -10,6 +10,7 @@ import seaborn as sns
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import plotly.figure_factory as ff
 
 
 def create_correlation_heatmap(df, figsize=(12, 10)):
@@ -133,10 +134,10 @@ def create_model_comparison_chart(comparison_df, metric='Accuracy'):
     
     fig = px.bar(
         comparison_df,
-        x='Model',
+        x='Model Name',
         y=metric,
         title=f'Model Comparison - {metric}',
-        color='Model',
+        color='Model Name',
         text=metric
     )
     
@@ -152,22 +153,33 @@ def create_model_comparison_chart(comparison_df, metric='Accuracy'):
 
 def create_confusion_matrix_plot(cm, labels=['Fail', 'Pass']):
     """
-    Create a confusion matrix heatmap.
+    Create a square divided confusion matrix plot with annotations.
     """
-    fig = px.imshow(
-        cm,
-        text_auto=True,
+    z_text = [[str(y) for y in x] for x in cm]
+    
+    # Label mapping for clarity
+    tn, fp, fn, tp = cm.ravel()
+    annotations = [
+        [f"TN: {tn}", f"FP: {fp}"],
+        [f"FN: {fn}", f"TP: {tp}"]
+    ]
+
+    fig = ff.create_annotated_heatmap(
+        z=cm,
         x=labels,
         y=labels,
-        color_continuous_scale='Blues',
-        title='Confusion Matrix'
+        annotation_text=annotations,
+        colorscale='Blues',
+        showscale=False
     )
     
     fig.update_layout(
-        xaxis_title='Predicted',
-        yaxis_title='Actual',
+        title='Confusion Matrix',
+        xaxis_title='Predicted Label',
+        yaxis_title='True Label',
         height=400,
-        width=400
+        width=400,
+        xaxis=dict(side='bottom')
     )
     
     return fig
@@ -316,7 +328,7 @@ def create_metrics_radar_chart(comparison_df):
     if comparison_df.empty:
         return None
     
-    metrics = [col for col in comparison_df.columns if col != 'Model']
+    metrics = [col for col in comparison_df.columns if col != 'Model Name']
     
     fig = go.Figure()
     
@@ -325,7 +337,7 @@ def create_metrics_radar_chart(comparison_df):
             r=[row[m] for m in metrics],
             theta=metrics,
             fill='toself',
-            name=row['Model']
+            name=row['Model Name']
         ))
     
     fig.update_layout(

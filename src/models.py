@@ -18,6 +18,7 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.svm import SVC
 from sklearn.cluster import KMeans
 from sklearn.neural_network import MLPClassifier, MLPRegressor
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.metrics import (
     mean_squared_error, mean_absolute_error, r2_score,
     accuracy_score, precision_score, recall_score, f1_score,
@@ -173,7 +174,8 @@ class StudentPerformanceModels:
             'cluster_centers': model.cluster_centers_,
             'inertia': model.inertia_,
             'silhouette_score': sil_score,
-            'cluster_sizes': pd.Series(clusters).value_counts().to_dict()
+            'cluster_sizes': pd.Series(clusters).value_counts().to_dict(),
+            'feature_names': X.columns.tolist() if hasattr(X, 'columns') else None
         }
         
         self.models['kmeans'] = model
@@ -255,6 +257,53 @@ class StudentPerformanceModels:
         self.models['mlp_regressor'] = model
         self.results['mlp_regressor'] = results
         return results
+
+    def train_random_forest_regressor(self, X_train, y_train, X_test, y_test):
+        """
+        Train and evaluate Random Forest Regressor.
+        """
+        model = RandomForestRegressor(n_estimators=100, random_state=42)
+        model.fit(X_train, y_train)
+        
+        y_pred_test = model.predict(X_test)
+        
+        results = {
+            'model_name': 'Random Forest Regressor',
+            'model_type': 'Regression',
+            'test_r2': r2_score(y_test, y_pred_test),
+            'test_mse': mean_squared_error(y_test, y_pred_test),
+            'test_mae': mean_absolute_error(y_test, y_pred_test),
+            'predictions': y_pred_test,
+            'feature_importances': dict(zip(X_train.columns, model.feature_importances_))
+        }
+        
+        self.models['random_forest_regressor'] = model
+        self.results['random_forest_regressor'] = results
+        return results
+
+    def train_random_forest_classifier(self, X_train, y_train, X_test, y_test):
+        """
+        Train and evaluate Random Forest Classifier.
+        """
+        model = RandomForestClassifier(n_estimators=100, random_state=42)
+        model.fit(X_train, y_train)
+        
+        y_pred_test = model.predict(X_test)
+        
+        results = {
+            'model_name': 'Random Forest Classifier',
+            'model_type': 'Classification',
+            'test_accuracy': accuracy_score(y_test, y_pred_test),
+            'precision': precision_score(y_test, y_pred_test, average='weighted', zero_division=0),
+            'recall': recall_score(y_test, y_pred_test, average='weighted', zero_division=0),
+            'f1_score': f1_score(y_test, y_pred_test, average='weighted', zero_division=0),
+            'confusion_matrix': confusion_matrix(y_test, y_pred_test),
+            'predictions': y_pred_test
+        }
+        
+        self.models['random_forest_classifier'] = model
+        self.results['random_forest_classifier'] = results
+        return results
     
     def get_model_comparison(self, model_type='classification'):
         """
@@ -263,22 +312,23 @@ class StudentPerformanceModels:
         comparison = []
         
         for name, result in self.results.items():
-            if model_type == 'classification' and 'accuracy' in str(result.get('model_type', '')).lower():
-                continue
-            if model_type == 'classification' and 'test_accuracy' in result:
+            current_type = str(result.get('model_type', '')).lower()
+            
+            if model_type == 'classification' and 'classification' in current_type:
                 comparison.append({
-                    'Model': result['model_name'],
-                    'Accuracy': result['test_accuracy'],
-                    'Precision': result['precision'],
-                    'Recall': result['recall'],
-                    'F1 Score': result['f1_score']
+                    'Model Name': result['model_name'],
+                    'Accuracy': result.get('test_accuracy', 0),
+                    'Precision': result.get('precision', 0),
+                    'Recall': result.get('recall', 0),
+                    'F1 Score': result.get('f1_score', 0)
                 })
-            elif model_type == 'regression' and 'test_r2' in result:
+            elif model_type == 'regression' and 'regression' in current_type:
                 comparison.append({
-                    'Model': result['model_name'],
-                    'R² Score': result['test_r2'],
-                    'MSE': result['test_mse'],
-                    'MAE': result['test_mae']
+                    'Model Name': result['model_name'],
+                    'R² Score': result.get('test_r2', 0),
+                    'MAE': result.get('test_mae', 0),
+                    'MSE': result.get('test_mse', 0),
+                    'RMSE': np.sqrt(result.get('test_mse', 0))
                 })
         
         return pd.DataFrame(comparison)
@@ -316,10 +366,12 @@ def train_all_models(X_train, y_train_reg, X_test, y_test_reg,
     
     # Regression models
     models.train_linear_regression(X_train, y_train_reg, X_test, y_test_reg)
+    models.train_random_forest_regressor(X_train, y_train_reg, X_test, y_test_reg)
     models.train_mlp_regressor(X_train, y_train_reg, X_test, y_test_reg)
     
     # Classification models
     models.train_logistic_regression(X_train, y_train_clf, X_test, y_test_clf)
+    models.train_random_forest_classifier(X_train, y_train_clf, X_test, y_test_clf)
     models.train_knn(X_train, y_train_clf, X_test, y_test_clf)
     models.train_svm(X_train, y_train_clf, X_test, y_test_clf)
     models.train_mlp_classifier(X_train, y_train_clf, X_test, y_test_clf)

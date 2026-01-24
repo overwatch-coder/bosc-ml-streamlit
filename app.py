@@ -85,6 +85,8 @@ if 'models_trained' not in st.session_state:
     st.session_state.models_trained = False
 if 'model_handler' not in st.session_state:
     st.session_state.model_handler = None
+if 'selected_features' not in st.session_state:
+    st.session_state.selected_features = []
 
 
 def load_and_prepare_data():
@@ -101,6 +103,42 @@ def load_and_prepare_data():
         except Exception as e:
             st.error(f"Error loading data: {e}")
             return False
+
+
+@st.dialog("🎯 Configure Factors of Interest")
+def feature_selection_dialog():
+    """Modal to select active features for analysis."""
+    st.write("Which student factors would you like to analyze? Factors not selected will be **dropped** from visualizations and model training.")
+    
+    df_full = st.session_state.df_enhanced
+    all_cols = sorted([c for c in df_full.columns if c != 'Exam_Score'])
+    
+    # Auto-initialize if empty
+    if not st.session_state.selected_features:
+        numeric_df = df_full.select_dtypes(include=[np.number])
+        correlations = numeric_df.corr()['Exam_Score'].abs().sort_values(ascending=False)
+        top_features = correlations[correlations.index != 'Exam_Score'].head(12).index.tolist()
+        st.session_state.selected_features = top_features if top_features else all_cols[:12]
+
+    # Selection
+    new_selection = st.multiselect(
+        "Active Factors (Factors of Interest)",
+        options=all_cols,
+        default=st.session_state.selected_features
+    )
+    
+    # Show dropped summary
+    dropped = list(set(all_cols) - set(new_selection))
+    if dropped:
+        with st.expander(f"🗑️ View {len(dropped)} Dropped Factors"):
+            st.write(", ".join(dropped))
+            
+    if st.button("✅ Apply Selection & Close", width='stretch', type="primary"):
+        st.session_state.selected_features = new_selection
+        # Reset models since feature set changed
+        st.session_state.models_trained = False
+        st.session_state.model_handler = None
+        st.rerun()
 
 
 def main():
@@ -130,6 +168,16 @@ def main():
         st.markdown("### 📁 Datasets")
         st.markdown("- [Student Performance Factors](https://www.kaggle.com/datasets/ayeshaseherr/student-performance)")
         st.markdown("- [Social Media Addiction vs Relationships](https://www.kaggle.com/datasets/adilshamim8/social-media-addiction-vs-relationships)")
+
+        if st.session_state.data_loaded:
+            st.markdown("---")
+            st.info("💡 Configuration Hub now on Home page.")
+            # Show a mini-summary of dropped features for awareness
+            df_full = st.session_state.df_enhanced
+            all_cols = [c for c in df_full.columns if c != 'Exam_Score']
+            dropped = list(set(all_cols) - set(st.session_state.selected_features))
+            if dropped:
+                st.caption(f"⚠️ {len(dropped)} factors are currently dropped.")
     
     # Main content based on page selection
     if page == "🏠 Home":
@@ -151,15 +199,19 @@ def render_home_page():
     st.markdown('<p class="main-header">🎓 Student Performance Prediction</p>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">A Machine Learning approach to predict academic performance</p>', unsafe_allow_html=True)
     
-    # Load data button
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
+    # Layout for data loading button
+    center_col1, center_col2, center_col3 = st.columns([1, 2, 1])
+    with center_col2:
         if not st.session_state.data_loaded:
-            if st.button("📥 Load Dataset from Kaggle", use_container_width=True, type="primary"):
-                load_and_prepare_data()
-                st.rerun()
+            if st.button("📥 Load Dataset from Kaggle", width='stretch', type="primary"):
+                if load_and_prepare_data():
+                    # After success, trigger the dialog immediately for first-time selection
+                    st.rerun()
         else:
             st.success("✅ Dataset loaded successfully!")
+            if st.button("🎯 Toggle & Select Factors", width='stretch', type="primary"):
+                feature_selection_dialog()
+            st.caption("Click the button above anytime to change the focus of your analysis.")
     
     st.markdown("---")
     
@@ -172,13 +224,16 @@ def render_home_page():
         This project analyzes factors affecting student academic performance and builds 
         predictive models using **real data** from two integrated Kaggle datasets.
         
-        **Key Real Factors Analyzed:**
-        - 😴 **Sleep Hours**: Actual hours from student reports.
-        - 📱 **Social Media**: Real usage hours and addiction levels.
-        - 🧠 **Mental Health**: Direct ratings from student surveys.
-        - 💑 **Relationships**: Impact of social status on studies.
-        - 🏋️ **Physical Activity**: Real exercise frequency.
+        **Key Factors of Interest (Active):**
         """)
+        selected_features = st.session_state.get('selected_features', [])
+        if selected_features:
+            for feat in selected_features[:10]: # Show top 10
+                st.markdown(f"- ✨ **{feat.replace('_', ' ')}**")
+            if len(selected_features) > 10:
+                st.caption(f"... and {len(selected_features)-10} more")
+        else:
+            st.caption("No features selected in sidebar.")
     
     with col2:
         st.markdown("### 🤖 ML Models Implemented")
@@ -186,6 +241,7 @@ def render_home_page():
         | Model | Type |
         |-------|------|
         | Linear Regression | Regression |
+        | Random Forest | Regression/Classification |
         | Logistic Regression | Classification |
         | K-Nearest Neighbors | Classification |
         | Support Vector Machine | Classification |
@@ -204,7 +260,8 @@ def render_home_page():
         with col1:
             st.metric("Total Students", f"{len(df):,}")
         with col2:
-            st.metric("Features", len(df.columns) - 1)
+            count = len(st.session_state.selected_features)
+            st.metric("Active Features", count)
         with col3:
             st.metric("Avg Exam Score", f"{df['Exam_Score'].mean():.1f}")
         with col4:
@@ -219,19 +276,23 @@ def render_data_exploration_page():
         st.warning("⚠️ Please load the dataset first from the Home page.")
         return
     
-    df = st.session_state.df_enhanced
+    df_full = st.session_state.df_enhanced
+    selected_features = st.session_state.selected_features
+    # Always include target
+    cols_to_show = selected_features + ['Exam_Score']
+    df = df_full[cols_to_show]
     
     # Tabs for different views
     tab1, tab2, tab3, tab4 = st.tabs(["📋 Data Preview", "📈 Statistics", "❓ Missing Values", "🔧 Simulated Features"])
     
     with tab1:
         st.markdown("### Raw Data Preview")
-        st.dataframe(df.head(100), use_container_width=True)
+        st.dataframe(df.head(100), width='stretch')
         st.info(f"Showing first 100 rows of {len(df):,} total records")
     
     with tab2:
         st.markdown("### Descriptive Statistics")
-        st.dataframe(df.describe().round(2), use_container_width=True)
+        st.dataframe(df.describe().round(2), width='stretch')
         
         col1, col2 = st.columns(2)
         with col1:
@@ -249,7 +310,7 @@ def render_data_exploration_page():
             'Missing Count': missing.values,
             'Missing %': (missing.values / len(df) * 100).round(2)
         })
-        st.dataframe(missing_df[missing_df['Missing Count'] > 0], use_container_width=True)
+        st.dataframe(missing_df[missing_df['Missing Count'] > 0], width='stretch')
         
         if missing.sum() == 0:
             st.success("✅ No missing values in the dataset!")
@@ -290,16 +351,15 @@ def render_data_exploration_page():
         
         # Show distribution of simulated features
         st.markdown("#### Distribution of Simulated Features")
-        col1, col2, col3, col4 = st.columns(4)
         
         simulated_cols = ['Social_Media_Hours', 'Movie_Addiction', 'Relationship_Status', 'Gym_Discipline']
         for i, col in enumerate(simulated_cols):
-            with [col1, col2, col3, col4][i]:
-                if col in df.columns:
-                    if df[col].dtype == 'object':
-                        st.plotly_chart(create_pie_chart(df[col], col), use_container_width=True, key=f"sim_pie_{col}")
-                    else:
-                        st.plotly_chart(create_distribution_plot(df, col), use_container_width=True, key=f"sim_dist_{col}")
+            if col in df.columns:
+                if df[col].dtype == 'object':
+                    st.plotly_chart(create_pie_chart(df[col], col), width='stretch', key=f"sim_pie_{col}")
+                else:
+                    st.plotly_chart(create_distribution_plot(df, col), width='stretch', key=f"sim_dist_{col}")
+                st.markdown("---") # Add a separator between vertical plots
 
 
 def render_visualizations_page():
@@ -310,7 +370,9 @@ def render_visualizations_page():
         st.warning("⚠️ Please load the dataset first from the Home page.")
         return
     
-    df = st.session_state.df_enhanced
+    df_full = st.session_state.df_enhanced
+    selected_features = st.session_state.selected_features
+    df = df_full[selected_features + ['Exam_Score']]
     
     # Encode for correlation
     df_encoded, _ = encode_categorical(df)
@@ -320,7 +382,7 @@ def render_visualizations_page():
     with tab1:
         st.markdown("### Correlation Heatmap")
         fig = create_correlation_heatmap(df_encoded)
-        st.plotly_chart(fig, use_container_width=True, key="corr_heatmap")
+        st.plotly_chart(fig, width='stretch', key="corr_heatmap")
         
         # Top correlations with Exam_Score
         st.markdown("### Top Correlations with Exam Score")
@@ -344,39 +406,44 @@ def render_visualizations_page():
         
         if df[feature].dtype in ['int64', 'float64']:
             fig = create_distribution_plot(df, feature)
-            st.plotly_chart(fig, use_container_width=True, key=f"dist_{feature}")
+            st.plotly_chart(fig, width='stretch', key=f"dist_{feature}")
         else:
             fig = create_pie_chart(df[feature], f"Distribution of {feature}")
-            st.plotly_chart(fig, use_container_width=True, key=f"pie_{feature}")
+            st.plotly_chart(fig, width='stretch', key=f"pie_{feature}")
     
     with tab3:
         st.markdown("### Feature vs Exam Score")
         
         col1, col2 = st.columns(2)
         with col1:
+            # Only numeric selected features
+            numeric_selected = [c for c in selected_features if df_full[c].dtype in ['int64', 'float64', 'int32', 'float32']]
             x_feature = st.selectbox("X-axis Feature", 
-                                     df.select_dtypes(include=[np.number]).columns.tolist(),
+                                     numeric_selected if numeric_selected else selected_features[:1],
                                      key="scatter_x")
         with col2:
+            # Only categorical selected features
+            cat_selected = [c for c in selected_features if df_full[c].dtype == 'object']
             color_by = st.selectbox("Color by (optional)", 
-                                    ['None'] + df.select_dtypes(include=['object']).columns.tolist(),
+                                    ['None'] + cat_selected,
                                     key="scatter_color")
         
         color_col = None if color_by == 'None' else color_by
         fig = create_scatter_with_regression(df, x_feature, 'Exam_Score', color_col)
-        st.plotly_chart(fig, use_container_width=True, key=f"scatter_{x_feature}")
+        st.plotly_chart(fig, width='stretch', key=f"scatter_{x_feature}")
     
     with tab4:
         st.markdown("### Focus Factors Analysis")
         st.info("Analyzing the key factors of interest: Sleep, Social Media, Movie Addiction, Relationship Status, Gym Discipline")
         
         # Box plots for categorical focus factors
-        categorical_focus = ['Movie_Addiction', 'Relationship_Status', 'Gym_Discipline', 'mental_health_rating', 'stress_level', 'Motivation_Level']
+        categorical_all = ['Movie_Addiction', 'Relationship_Status', 'Gym_Discipline', 'mental_health_rating', 'stress_level', 'Motivation_Level', 'Gender', 'School_Type', 'Major']
+        categorical_focus = [f for f in categorical_all if f in selected_features]
         
         for i, factor in enumerate(categorical_focus):
             if factor in df.columns:
                 fig = create_box_plot(df, factor, 'Exam_Score')
-                st.plotly_chart(fig, use_container_width=True, key=f"box_{factor}")
+                st.plotly_chart(fig, width='stretch', key=f"box_{factor}")
         
         # Scatter for numerical focus factors
         st.markdown("### Numerical Focus Factors")
@@ -384,21 +451,21 @@ def render_visualizations_page():
         with col1:
             if 'Sleep_Hours' in df.columns:
                 fig = create_scatter_with_regression(df, 'Sleep_Hours', 'Exam_Score')
-                st.plotly_chart(fig, use_container_width=True, key="scatter_sleep")
+                st.plotly_chart(fig, width='stretch', key="scatter_sleep")
         with col2:
             if 'Social_Media_Hours' in df.columns:
                 fig = create_scatter_with_regression(df, 'Social_Media_Hours', 'Exam_Score')
-                st.plotly_chart(fig, use_container_width=True, key="scatter_social")
+                st.plotly_chart(fig, width='stretch', key="scatter_social")
         
         col1, col2 = st.columns(2)
         with col1:
             if 'Movie_Hours' in df.columns:
                 fig = create_scatter_with_regression(df, 'Movie_Hours', 'Exam_Score')
-                st.plotly_chart(fig, use_container_width=True, key="scatter_movie")
+                st.plotly_chart(fig, width='stretch', key="scatter_movie")
         with col2:
             if 'exam_anxiety_score' in df.columns:
                 fig = create_scatter_with_regression(df, 'exam_anxiety_score', 'Exam_Score')
-                st.plotly_chart(fig, use_container_width=True, key="scatter_anxiety")
+                st.plotly_chart(fig, width='stretch', key="scatter_anxiety")
 
 
 def render_model_training_page():
@@ -410,24 +477,38 @@ def render_model_training_page():
         return
     
     df = st.session_state.df_enhanced
+    selected_features = st.session_state.selected_features
     
-    # Model parameters
+    if not selected_features:
+        st.error("⚠️ No features selected! Please select active factors in the Sidebar.")
+        return
+
     st.markdown("### ⚙️ Training Parameters")
     col1, col2, col3 = st.columns(3)
     with col1:
-        test_size = st.slider("Test Size", 0.1, 0.4, 0.2, 0.05)
+        test_size = st.slider("Test Size", 0.1, 0.4, 0.2, 0.05, key="test_size")
     with col2:
-        pass_threshold = st.slider("Pass Threshold (for classification)", 50, 70, 60)
+        pass_threshold = st.slider("Pass Threshold (for classification)", 50, 70, 60, key="pass_threshold")
     with col3:
-        k_neighbors = st.slider("K for KNN", 3, 15, 5)
+        k_neighbors = st.slider("K for KNN", 3, 15, 5, key="k_neighbors")
+    
+    # Feature Selection summary
+    st.markdown("### 🎯 Active Model Features")
+    st.info(f"Training models using {len(selected_features)} selected factors. Check the sidebar to add/remove factors.")
+    st.write(", ".join(selected_features))
     
     # Train button
-    if st.button("🚀 Train All Models", type="primary", use_container_width=True):
+    if st.button("🚀 Train All Models", type="primary", width='stretch'):
         with st.spinner("Training models... This may take a moment."):
             try:
-                # Prepare data
+                # Prepare data with selected features only
                 df_encoded, encoders = encode_categorical(df)
-                X, y = get_feature_target_split(df_encoded, 'Exam_Score')
+                
+                # Filter to only selected features + target
+                cols_to_use = selected_features + ['Exam_Score']
+                df_filtered = df_encoded[cols_to_use]
+                
+                X, y = get_feature_target_split(df_filtered, 'Exam_Score')
                 X_train, X_test, y_train, y_test = split_data(X, y, test_size=test_size)
                 
                 # Scale features
@@ -444,10 +525,12 @@ def render_model_training_page():
                 
                 # Regression models
                 model_handler.train_linear_regression(X_train_scaled, y_train, X_test_scaled, y_test)
+                model_handler.train_random_forest_regressor(X_train_scaled, y_train, X_test_scaled, y_test)
                 model_handler.train_mlp_regressor(X_train_scaled, y_train, X_test_scaled, y_test)
                 
                 # Classification models
                 model_handler.train_logistic_regression(X_train_scaled, y_train_clf, X_test_scaled, y_test_clf)
+                model_handler.train_random_forest_classifier(X_train_scaled, y_train_clf, X_test_scaled, y_test_clf)
                 model_handler.train_knn(X_train_scaled, y_train_clf, X_test_scaled, y_test_clf, k_neighbors)
                 model_handler.train_svm(X_train_scaled, y_train_clf, X_test_scaled, y_test_clf)
                 model_handler.train_mlp_classifier(X_train_scaled, y_train_clf, X_test_scaled, y_test_clf)
@@ -485,19 +568,31 @@ def render_model_training_page():
         
         with tab1:
             st.markdown("#### Regression Model Comparison")
+            st.info("The table below compares regression models across key metrics. The best performing model for each metric is highlighted in green.")
             
             reg_comparison = model_handler.get_model_comparison('regression')
             if not reg_comparison.empty:
-                st.dataframe(reg_comparison.round(4), use_container_width=True)
+                # Transpose for easier row-wise comparison of models
+                reg_comp_t = reg_comparison.set_index('Model Name').T
+                
+                def highlight_best_reg_t(row):
+                    is_min_metrics = ['MAE', 'MSE', 'RMSE']
+                    if row.name in is_min_metrics:
+                        best_val = row.min()
+                    else:
+                        best_val = row.max()
+                    return ['background-color: rgba(0, 255, 0, 0.3)' if v == best_val else '' for v in row]
+
+                st.dataframe(reg_comp_t.style.apply(highlight_best_reg_t, axis=1).format(precision=4), width='stretch')
                 
                 # Visualization
                 col1, col2 = st.columns(2)
                 with col1:
                     fig = create_model_comparison_chart(reg_comparison, 'R² Score')
-                    st.plotly_chart(fig, use_container_width=True, key="reg_r2_comp")
+                    st.plotly_chart(fig, width='stretch', key="reg_r2_comp")
                 with col2:
                     fig = create_model_comparison_chart(reg_comparison, 'MAE')
-                    st.plotly_chart(fig, use_container_width=True, key="reg_mae_comp")
+                    st.plotly_chart(fig, width='stretch', key="reg_mae_comp")
                 
                 # Actual vs Predicted for Linear Regression
                 if 'linear_regression' in model_handler.results:
@@ -507,61 +602,63 @@ def render_model_training_page():
                         st.session_state.y_test.values,
                         lr_results['predictions']
                     )
-                    st.plotly_chart(fig, use_container_width=True, key="lr_actual_pred")
+                    st.plotly_chart(fig, width='stretch', key="lr_actual_pred")
                     
                     # Feature importance
                     st.markdown("#### Feature Importance (Linear Regression Coefficients)")
                     coefficients = lr_results.get('coefficients', {})
                     if coefficients:
                         fig = create_feature_importance_chart(coefficients)
-                        st.plotly_chart(fig, use_container_width=True, key="lr_feat_imp")
+                        st.plotly_chart(fig, width='stretch', key="lr_feat_imp")
         
         with tab2:
             st.markdown("#### Classification Model Comparison")
+            st.info("The table below compares classification models. The best performing model for each metric is highlighted in green.")
             
-            # Build comparison manually
-            clf_models = ['logistic_regression', 'knn', 'svm', 'mlp_classifier']
-            clf_data = []
-            for model_name in clf_models:
-                if model_name in model_handler.results:
-                    r = model_handler.results[model_name]
-                    clf_data.append({
-                        'Model': r['model_name'],
-                        'Accuracy': r['test_accuracy'],
-                        'Precision': r['precision'],
-                        'Recall': r['recall'],
-                        'F1 Score': r['f1_score']
-                    })
-            
-            clf_comparison = pd.DataFrame(clf_data)
+            clf_comparison = model_handler.get_model_comparison('classification')
             if not clf_comparison.empty:
-                st.dataframe(clf_comparison.round(4), use_container_width=True)
+                # Transpose for easier row-wise comparison
+                clf_comp_t = clf_comparison.set_index('Model Name').T
+                
+                def highlight_best_clf_t(row):
+                    # For classification metrics, higher is always better
+                    best_val = row.max()
+                    return ['background-color: rgba(0, 255, 0, 0.3)' if v == best_val else '' for v in row]
+
+                st.dataframe(clf_comp_t.style.apply(highlight_best_clf_t, axis=1).format(precision=4), width='stretch')
                 
                 # Visualizations
                 col1, col2 = st.columns(2)
                 with col1:
                     fig = create_model_comparison_chart(clf_comparison, 'Accuracy')
-                    st.plotly_chart(fig, use_container_width=True, key="clf_acc_comp")
+                    st.plotly_chart(fig, width='stretch', key="clf_acc_comp")
                 with col2:
                     fig = create_model_comparison_chart(clf_comparison, 'F1 Score')
-                    st.plotly_chart(fig, use_container_width=True, key="clf_f1_comp")
+                    st.plotly_chart(fig, width='stretch', key="clf_f1_comp")
                 
                 # Radar chart
                 st.markdown("#### Model Comparison Radar Chart")
                 fig = create_metrics_radar_chart(clf_comparison)
                 if fig:
-                    st.plotly_chart(fig, use_container_width=True, key="clf_radar")
+                    st.plotly_chart(fig, width='stretch', key="clf_radar")
                 
                 # Confusion matrices
                 st.markdown("#### Confusion Matrices")
-                cols = st.columns(4)
-                for i, model_name in enumerate(clf_models):
-                    if model_name in model_handler.results:
-                        with cols[i]:
-                            cm = model_handler.results[model_name]['confusion_matrix']
-                            st.markdown(f"**{model_handler.results[model_name]['model_name']}**")
-                            fig = create_confusion_matrix_plot(cm)
-                            st.plotly_chart(fig, use_container_width=True, key=f"cm_{model_name}")
+                clf_models_to_show = [m for m in ['logistic_regression', 'random_forest_classifier', 'knn', 'svm', 'mlp_classifier'] if m in model_handler.results]
+                
+                # Show in a grid (2 per row for better visibility)
+                num_cols = 2
+                for row_idx in range((len(clf_models_to_show) + num_cols - 1) // num_cols):
+                    cols = st.columns(num_cols)
+                    for col_idx in range(num_cols):
+                        model_idx = row_idx * num_cols + col_idx
+                        if model_idx < len(clf_models_to_show):
+                            m_key = clf_models_to_show[model_idx]
+                            with cols[col_idx]:
+                                m_res = model_handler.results[m_key]
+                                st.markdown(f"**{m_res['model_name']}**")
+                                fig = create_confusion_matrix_plot(m_res['confusion_matrix'])
+                                st.plotly_chart(fig, width='stretch', key=f"cm_{m_key}")
                 
                 # MLP Loss curve
                 if 'mlp_classifier' in model_handler.results:
@@ -569,7 +666,7 @@ def render_model_training_page():
                     if loss_curve:
                         st.markdown("#### Neural Network Training Loss")
                         fig = create_loss_curve(loss_curve)
-                        st.plotly_chart(fig, use_container_width=True, key="mlp_loss")
+                        st.plotly_chart(fig, width='stretch', key="mlp_loss")
         
         with tab3:
             st.markdown("#### K-Means Clustering Results")
@@ -585,12 +682,43 @@ def render_model_training_page():
                 with col3:
                     st.metric("Inertia", f"{km_results['inertia']:.1f}")
                 
-                st.markdown("#### Cluster Sizes")
-                cluster_sizes = pd.DataFrame({
-                    'Cluster': list(km_results['cluster_sizes'].keys()),
-                    'Size': list(km_results['cluster_sizes'].values())
-                })
-                st.dataframe(cluster_sizes, use_container_width=True)
+                st.markdown("#### Cluster Profiles & Interpretations")
+                
+                centers = km_results['cluster_centers']
+                features = km_results['feature_names']
+                
+                if features:
+                    profiles = []
+                    for i in range(len(centers)):
+                        profile = {'Cluster': f"Group {i}"}
+                        # Create descriptive names based on key features
+                        score_idx = features.index('Exam_Score') if 'Exam_Score' in features else -1
+                        study_idx = features.index('Hours_Studied') if 'Hours_Studied' in features else -1
+                        health_idx = features.index('mental_health_rating') if 'mental_health_rating' in features else -1
+                        
+                        # Interpretation logic
+                        avg_score = centers[i][score_idx] if score_idx != -1 else 0
+                        avg_study = centers[i][study_idx] if study_idx != -1 else 0
+                        
+                        group_name = "Standard Students"
+                        if avg_score > 0.5 and avg_study > 0.5: group_name = "Academic Achievers 🏆"
+                        elif avg_score < -0.5: group_name = "At-Risk Students ⚠️"
+                        elif avg_study > 0.5 and avg_score < 0: group_name = "Hard Workers (Low Efficiency) 📚"
+                        elif avg_study < -0.5 and avg_score > 0: group_name = "High Efficiency Students ⚡"
+                        
+                        profile['Group Name'] = group_name
+                        profile['Size'] = km_results['cluster_sizes'].get(i, 0)
+                        
+                        # Add a few representative feature levels
+                        for feat_idx, feat_name in enumerate(features[:5]): # Show first 5 features
+                            val = centers[i][feat_idx]
+                            profile[feat_name] = "High (+) " if val > 0.3 else ("Low (-)" if val < -0.3 else "Average")
+                            
+                        profiles.append(profile)
+                    
+                    st.dataframe(pd.DataFrame(profiles), width='stretch')
+                else:
+                    st.dataframe(cluster_sizes, width='stretch')
 
 
 def render_predictions_page():
@@ -603,7 +731,9 @@ def render_predictions_page():
     
     st.info("Enter student information to predict their exam score and pass/fail status.")
     
-    df = st.session_state.df_enhanced
+    df_full = st.session_state.df_enhanced
+    selected_features = st.session_state.selected_features
+    df = df_full[selected_features + ['Exam_Score']]
     model_handler = st.session_state.model_handler
     
     def get_opts(col, default_opts):
@@ -611,99 +741,88 @@ def render_predictions_page():
             return sorted(df[col].unique().tolist())
         return default_opts
 
-    # Create input form
-    col1, col2, col3 = st.columns(3)
+    # Dynamic input form based on selected features
+    st.markdown("### 📝 Enter Student Data")
+    st.caption("Only 'Active Factors' selected on the Home page are shown here.")
     
-    with col1:
-        st.markdown("### 📚 Academic Factors")
-        hours_studied = st.slider("Hours Studied (per day)", 0.0, 15.0, 5.0, 0.5)
-        attendance = st.slider("Attendance (%)", 0, 100, 85)
-        previous_scores = st.slider("Previous GPA (0-4)", 0.0, 4.0, 3.2, 0.1)
-        exam_anxiety = st.slider("Exam Anxiety Score (0-100)", 0, 100, 30)
-        time_mgmt = st.slider("Time Management Score (0-100)", 0, 100, 70)
+    input_data = {}
     
-    with col2:
-        st.markdown("### 🏠 Personal Factors")
-        sleep_hours = st.slider("Sleep Hours (per night)", 4.0, 10.0, 7.0, 0.5)
-        social_media_hours = st.slider("Social Media Hours (per day)", 0.0, 12.0, 2.0, 0.5)
-        movie_hours = st.slider("Netflix/Movie Hours (per day)", 0.0, 8.0, 1.5, 0.5)
-        
-        mental_health = st.slider("Mental Health Rating (1-5)", 1, 5, 4)
-        stress_level = st.slider("Stress Level (1-5)", 1, 5, 2)
-        motivation_level = st.selectbox("Motivation Level", get_opts("Motivation_Level", ["Low", "Medium", "High"]))
-        relationship_status = st.selectbox("Relationship Status", get_opts("Relationship_Status", ["Single", "In Relationship"]))
-    
-    with col3:
-        st.markdown("### 🏫 Environment & Others")
-        diet_quality = st.selectbox("Diet Quality", get_opts("diet_quality", ["Poor", "Average", "Good"]))
-        internet_access = st.selectbox("Internet Access", get_opts("Internet_Access", ["Yes", "No"]))
-        parental_involvement = st.selectbox("Parental Involvement", get_opts("Parental_Involvement", ["Low", "Medium", "High"]))
-        access_to_resources = st.selectbox("Access to Resources", get_opts("Access_to_Resources", ["Low", "Medium", "High"]))
-        teacher_quality = st.selectbox("Teacher Quality", get_opts("Teacher_Quality", ["Low", "Medium", "High"]))
-        gender = st.selectbox("Gender", get_opts("Gender", ["Male", "Female"]))
-        age = st.slider("Age", 15, 30, 20)
-        physical_activity = st.slider("Physical Activity (hours/week)", 0, 10, 3)
-    
-    # Additional factors in expander
-    with st.expander("More Detailed Factors"):
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            school_type = st.selectbox("School Type", get_opts("School_Type", ["Public", "Private"]))
-            major = st.selectbox("Major", get_opts("major", ["Computer Science", "Engineering", "Arts"]))
-        with col2:
-            extracurricular = st.selectbox("Extracurricular Activities", get_opts("Extracurricular_Activities", ["Yes", "No"]))
-            tutoring_sessions = st.slider("Tutoring Sessions", 0, 10, 2)
-        with col3:
-            family_income = st.selectbox("Family Income Range", get_opts("Family_Income", ["Low", "Medium", "High"]))
-            parental_edu = st.selectbox("Parental Education Level", get_opts("Parental_Education_Level", ["High School", "College", "Postgraduate"]))
-    
+    # Configuration for widgets
+    # Format: label, type (slider/select), min, max, default, step/options
+    config = {
+        'Hours_Studied': ("📚 Hours Studied", "slider", 0.0, 15.0, 5.0, 0.5),
+        'Attendance': ("📅 Attendance (%)", "slider", 0, 100, 85, 1),
+        'Previous_Scores': ("📉 Previous GPA", "slider", 0.0, 4.0, 3.2, 0.1),
+        'exam_anxiety_score': ("🧠 Exam Anxiety", "slider", 0, 100, 30, 1),
+        'Sleep_Hours': ("😴 Sleep Hours", "slider", 0.0, 12.0, 7.0, 0.5),
+        'Social_Media_Hours': ("📱 Social Media Hours", "slider", 0.0, 15.0, 2.0, 0.5),
+        'Movie_Hours': ("🎬 Movie/Netflix Hours", "slider", 0.0, 10.0, 1.5, 0.5),
+        'Physical_Activity': ("🏋️ Physical Activity", "slider", 0, 20, 3, 1),
+        'mental_health_rating': ("🧘 Mental Health", "slider", 1, 5, 4, 1),
+        'stress_level': ("😰 Stress Level", "slider", 1, 5, 2, 1),
+        'Tutoring_Sessions': ("🏫 Tutoring Sessions", "slider", 0, 15, 2, 1),
+        'Age': ("🎂 Age", "slider", 15, 60, 20, 1),
+        'age': ("🎂 Age", "slider", 15, 60, 20, 1),
+        'Motivation_Level': ("🔥 Motivation Level", "selectbox", ["Low", "Medium", "High"]),
+        'Internet_Access': ("🌐 Internet Access", "selectbox", ["Yes", "No"]),
+        'Gender': ("👤 Gender", "selectbox", ["Male", "Female"]),
+        'Relationship_Status': ("💑 Relationship Status", "selectbox", ["Single", "In Relationship"]),
+        'Family_Income': ("💰 Family Income", "selectbox", ["Low", "Medium", "High"]),
+        'Teacher_Quality': ("👨‍🏫 Teacher Quality", "selectbox", ["Low", "Medium", "High"]),
+        'School_Type': ("🏫 School Type", "selectbox", ["Public", "Private"]),
+        'Parental_Involvement': ("👪 Parental Involvement", "selectbox", ["Low", "Medium", "High"]),
+        'Access_to_Resources': ("📚 Access to Resources", "selectbox", ["Low", "Medium", "High"]),
+        'Parental_Education_Level': ("🎓 Parental Education", "selectbox", ["High School", "College", "Postgraduate"]),
+        'major': ("🎓 Major", "selectbox", ["Computer Science", "Engineering", "Arts", "Business"]),
+        'Extracurricular_Activities': ("⚽ Extracurriculars", "selectbox", ["Yes", "No"]),
+        'Peer_Influence': ("👥 Peer Influence", "selectbox", ["Positive", "Neutral", "Negative"]),
+        'Learning_Disabilities': ("⚠️ Learning Disabilities", "selectbox", ["No", "Yes"]),
+        'Distance_from_Home': ("🏠 Distance from Home", "selectbox", ["Near", "Moderate", "Far"]),
+    }
+
+    # Split into 3 columns
+    cols = st.columns(3)
+    for i, field in enumerate(selected_features):
+        with cols[i % 3]:
+            if field in config:
+                info = config[field]
+                if info[1] == "slider":
+                    input_data[field] = st.slider(info[0], info[2], info[3], info[4], info[5])
+                else:
+                    input_data[field] = st.selectbox(info[0], get_opts(field, info[2]))
+            else:
+                # Fallback for unexpected features
+                if df_full[field].dtype in ['int64', 'float64']:
+                    input_data[field] = st.number_input(f"{field}", value=0.0)
+                else:
+                    input_data[field] = st.selectbox(f"{field}", get_opts(field, ["N/A"]))
+
     # Prediction button
-    if st.button("🔮 Predict Performance", type="primary", use_container_width=True):
+    if st.button("🔮 Predict Performance", type="primary", width='stretch'):
         try:
-            # Create input dictionary
-            input_data = {
-                'Gender': gender,
-                'age': age,
-                'Age': age, # Safety for casing
-                'Hours_Studied': hours_studied,
-                'Social_Media_Hours': social_media_hours,
-                'Movie_Hours': movie_hours,
-                'Attendance': attendance,
-                'Sleep_Hours': sleep_hours,
-                'diet_quality': diet_quality,
-                'Internet_Access': internet_access,
-                'mental_health_rating': mental_health,
-                'Physical_Activity': physical_activity,
-                'Extracurricular_Activities': extracurricular,
-                'Family_Income': family_income,
-                'Parental_Involvement': parental_involvement,
-                'Access_to_Resources': access_to_resources,
-                'Teacher_Quality': teacher_quality,
-                'School_Type': school_type,
-                'Parental_Education_Level': parental_edu,
-                'Motivation_Level': motivation_level,
-                'Previous_Scores': previous_scores,
-                'Relationship_Status': relationship_status,
-                'Tutoring_Sessions': tutoring_sessions,
-                'Movie_Addiction': 'Low' if movie_hours < 1.5 else ('Medium' if movie_hours < 3.5 else 'High'),
-                'Gym_Discipline': 'Low',
-                'Social_Media_Addiction_Level': 3.0,
-            }
+            # Handle special cases for internal logic if features were dropped
+            if 'Movie_Hours' in input_data:
+                mh = input_data['Movie_Hours']
+                input_data['Movie_Addiction'] = 'Low' if mh < 1.5 else ('Medium' if mh < 3.5 else 'High')
             
-            # Additional academic features that might be in the dataset
-            input_data['Peer_Influence'] = "Neutral"
-            input_data['Learning_Disabilities'] = "No"
-            input_data['Distance_from_Home'] = "Near"
-            input_data['major'] = major
+            # Create safety copy of input_data for dataframe
+            final_input = input_data.copy()
             
-            input_df = pd.DataFrame([input_data])
+            # Ensure every single column the model was trained on exists (for safety)
+            feature_columns = st.session_state.feature_columns
+            for col in feature_columns:
+                if col not in final_input:
+                    # Fill dropped features with 0 (numeric) or a default string
+                    if df_full[col].dtype in ['int64', 'float64']:
+                        final_input[col] = 0
+                    else:
+                        # Try to get first unique value or "N/A"
+                        final_input[col] = str(df_full[col].mode()[0]) if col in df_full.columns else "N/A"
+            
+            input_df = pd.DataFrame([final_input])
             
             # CRITICAL: Ensure every single column the model was trained on exists here
             feature_columns = st.session_state.feature_columns
-            for col in feature_columns:
-                if col not in input_df.columns:
-                    # Fill with 0 or most common value logic if needed
-                    input_df[col] = 0
             
             # Encode categorical variables using the saved encoders
             encoders = st.session_state.encoders
@@ -732,62 +851,114 @@ def render_predictions_page():
             
             # Scale
             scaler = st.session_state.scaler
-            input_scaled = scaler.transform(input_df)
+            input_scaled_arr = scaler.transform(input_df)
+            input_scaled = pd.DataFrame(input_scaled_arr, columns=feature_columns)
             
-            # Make predictions
-            score_pred = model_handler.predict('linear_regression', input_scaled)[0]
-            pass_pred = model_handler.predict('logistic_regression', input_scaled)[0]
+            # 1. Prediction Comparison Table (separately for all models)
+            st.markdown("### 📊 Model Comparison for this Prediction")
             
-            # Display results
+            reg_models = {
+                'linear_regression': 'Linear Regression',
+                'random_forest_regressor': 'Random Forest',
+                'mlp_regressor': 'Neural Network (MLP)'
+            }
+            
+            clf_models = {
+                'logistic_regression': 'Logistic Regression',
+                'random_forest_classifier': 'Random Forest',
+                'knn': 'K-Nearest Neighbors',
+                'svm': 'SVM',
+                'mlp_classifier': 'Neural Network (MLP)'
+            }
+            
+            # Collect all predictions
+            all_preds = []
+            for m_key, m_name in reg_models.items():
+                if m_key in model_handler.models:
+                    pred = model_handler.predict(m_key, input_scaled)[0]
+                    reliability = model_handler.results[m_key]['test_r2'] * 100
+                    all_preds.append({
+                        'Type': 'Score Prediction',
+                        'Model': m_name,
+                        'Prediction': f"{pred:.1f}",
+                        'Reliability (Accuracy)': f"{max(0, reliability):.1f}%"
+                    })
+            
+            for m_key, m_name in clf_models.items():
+                if m_key in model_handler.models:
+                    pred = model_handler.predict(m_key, input_scaled)[0]
+                    precision = model_handler.results[m_key]['precision'] * 100
+                    all_preds.append({
+                        'Type': 'Pass/Fail Status',
+                        'Model': m_name,
+                        'Prediction': "Pass ✅" if pred == 1 else "Fail ❌",
+                        'Reliability (Precision)': f"{precision:.1f}%"
+                    })
+            
+            # Model comparison for this prediction
+            st.markdown("### 📊 Model Consensus")
+            all_preds_df = pd.DataFrame(all_preds)
+            st.dataframe(all_preds_df, width='stretch')
+            
             st.markdown("---")
-            st.markdown("### 🎉 Prediction Results")
+            
+            # Detailed View based on selection
+            st.markdown("### 🎯 Detailed Prediction Analysis")
+            col_sel1, col_sel2 = st.columns(2)
+            with col_sel1:
+                # Filter reg_models to only those trained
+                avail_regs = {k: v for k, v in reg_models.items() if k in model_handler.models}
+                selected_reg_name = st.selectbox("Select Regressor for Score", list(avail_regs.values()), key="sel_reg")
+            with col_sel2:
+                # Filter clf_models to only those trained
+                avail_clfs = {k: v for k, v in clf_models.items() if k in model_handler.models}
+                selected_clf_name = st.selectbox("Select Classifier for Status", list(avail_clfs.values()), key="sel_clf")
+            
+            reg_key = [k for k, v in avail_regs.items() if v == selected_reg_name][0]
+            clf_key = [k for k, v in avail_clfs.items() if v == selected_clf_name][0]
+            
+            score_pred = model_handler.predict(reg_key, input_scaled)[0]
+            pass_pred = model_handler.predict(clf_key, input_scaled)[0]
             
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.metric("Predicted Exam Score", f"{score_pred:.1f}")
+                rel = model_handler.results[reg_key]['test_r2'] * 100
+                st.caption(f"📊 Accuracy ({selected_reg_name}): {max(0, rel):.1f}%")
+            
             with col2:
                 status = "Pass ✅" if pass_pred == 1 else "Fail ❌"
                 st.metric("Pass/Fail Prediction", status)
-            with col3:
-                # Grade
-                if score_pred >= 90:
-                    grade = "A"
-                elif score_pred >= 80:
-                    grade = "B"
-                elif score_pred >= 70:
-                    grade = "C"
-                elif score_pred >= 60:
-                    grade = "D"
-                else:
-                    grade = "F"
-                st.metric("Predicted Grade", grade)
+                prec = model_handler.results[clf_key]['precision'] * 100
+                st.caption(f"🎯 Precision ({selected_clf_name}): {prec:.1f}%")
             
-            # Insights
-            st.markdown("### 💡 Insights")
+            with col3:
+                # Grade logic
+                g = "F"
+                if score_pred >= 90: g = "A"
+                elif score_pred >= 80: g = "B"
+                elif score_pred >= 70: g = "C"
+                elif score_pred >= 60: g = "D"
+                st.metric("Predicted Grade", g)
+                st.caption("Based on standard GPA scale")
+
+            # Insights summary
+            st.markdown("### 💡 Strategic Insights")
             insights = []
-            if social_media_hours > 4:
-                insights.append("⚠️ High social media usage (>4h) might be distracting you.")
-            if movie_hours > 3:
-                insights.append("⚠️ Excessive Netflix/Movie time can impact your focus.")
-            if sleep_hours < 7:
-                insights.append("😴 Getting more than 7 hours of sleep is recommended for students.")
-            if previous_scores < 2.5:
-                insights.append("📚 Your previous GPA is low. Focus on core subjects.")
-            if stress_level > 3:
-                insights.append("🧘 High stress detected. Consider mindfulness or time management.")
-            if exam_anxiety > 50:
-                insights.append("🧠 High exam anxiety. Preparation and tutoring might help.")
-            if attendance < 80:
-                insights.append("📅 Improving attendance remains the most effective way to boost scores.")
+            if 'Hours_Studied' in input_data and input_data['Hours_Studied'] < 3:
+                insights.append("⚠️ Low study hours detected. Increasing focus blocks could boost your score.")
+            if 'Attendance' in input_data and input_data['Attendance'] < 75:
+                insights.append("📅 Low attendance is a high-risk factor for exam failure.")
+            if 'Sleep_Hours' in input_data and input_data['Sleep_Hours'] < 6:
+                insights.append("😴 Lack of sleep significantly impairs cognitive recall during exams.")
             
             if insights:
-                for insight in insights:
-                    st.write(insight)
+                for ins in insights: st.write(f"- {ins}")
             else:
-                st.success("✨ Great habits! Keep up the good work!")
-                
+                st.success("✨ Good habit balance detected! Keep it up.")
+
         except Exception as e:
-            st.error(f"Error making prediction: {e}")
+            st.error(f"Prediction Error: {e}")
             import traceback
             st.code(traceback.format_exc())
 def render_report_page():
@@ -820,6 +991,7 @@ def render_report_page():
     | Model | Type | Purpose |
     |-------|------|---------|
     | Linear Regression | Regression | Predict exact GPA/Exam scores |
+    | Random Forest | Ens. Learning | High-performance non-linear modeling |
     | Logistic Regression | Classification | Pass/Fail binary classification |
     | KNN | Classification | Distance-based student grouping |
     | SVM | Classification | High-dimensional classification |
@@ -837,7 +1009,7 @@ def render_report_page():
             lr_r2 = model_handler.results['linear_regression']['test_r2']
             st.markdown(f"- **Linear Regression R² Score**: {lr_r2:.4f}")
         
-        clf_models = ['logistic_regression', 'knn', 'svm', 'mlp_classifier']
+        clf_models = ['logistic_regression', 'random_forest_classifier', 'knn', 'svm', 'mlp_classifier']
         best_acc = 0
         best_model = ""
         for model_name in clf_models:
