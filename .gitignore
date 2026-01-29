@@ -1,9 +1,6 @@
 venv/
 .vscode/
 *.txt
-BofCS_Presentation Guidelines.md
-BofCS_WEEK10.md
-ML group.md
 data/
 __pycache__/
 *.py[cod]

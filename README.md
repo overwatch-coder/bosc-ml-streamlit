@@ -46,12 +46,12 @@ ml_project/
 ## 📊 Features Analyzed
 
 - Hours Studied, Attendance, Sleep Hours
-- Social Media Usage (**Real data from Sanchit Vignesh dataset**)
-- Movie/Netflix Hours (**Real data**)
-- Mental Health Rating, Stress Level (**New real factors**)
-- Relationship Status (simulated)
+- Social Media Usage
+- Movie/Netflix Hours
+- Mental Health Rating, Stress Level
+- Relationship Status
 - Physical Activity, Motivation Level
-- And more...
+- Etc...
 
 
 ## 👥 Group Members

@@ -89,7 +89,7 @@ def create_distribution_plot(df, column, title=None):
     return fig
 
 
-def create_scatter_with_regression(df, x_col, y_col, color_col=None):
+def create_scatter_with_regression(df, x_col, y_col, color_col=None, x_tick_map=None):
     """
     Create a scatter plot with regression line.
     """
@@ -104,6 +104,15 @@ def create_scatter_with_regression(df, x_col, y_col, color_col=None):
     )
     
     fig.update_layout(height=500)
+    
+    if x_tick_map:
+        fig.update_layout(
+            xaxis=dict(
+                tickmode='array',
+                tickvals=list(x_tick_map.keys()),
+                ticktext=list(x_tick_map.values())
+            )
+        )
     
     return fig
 
