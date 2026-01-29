@@ -115,14 +115,25 @@ def feature_selection_dialog():
     df_full = st.session_state.df_enhanced
     all_cols = sorted([c for c in df_full.columns if c != 'Exam_Score'])
     
+    # Default features we want to use (if they exist)
+    default_features = [
+        'Attendance', 'Hours_Studied', 'Previous_Scores', 'Tutoring_Sessions', 
+        'Physical_Activity', 'Movie_Hours', 'Sleep_Hours', 'Movie_Addiction', 
+        'mental_health_rating', 'Social_Media_Hours', 'Relationship_Status', 
+        'Extracurricular_Activities', 'Gym_Discipline', 'Motivation_Level'
+    ]
+    
+    # Filter to only include features that actually exist in the dataset
+    valid_defaults = [f for f in default_features if f in all_cols]
+    
     # Auto-initialize if empty (doubling up for safety)
     if not st.session_state.selected_features:
-        st.session_state.selected_features = [
-            'Attendance', 'Hours_Studied', 'Previous_Scores', 'Tutoring_Sessions', 
-            'Physical_Activity', 'Movie_Hours', 'Sleep_Hours', 'Movie_Addiction', 
-            'mental_health_rating', 'Social_Media_Hours', 'Relationship_Status', 
-            'Extracurricular_Activities', 'Gym_Discipline', 'Motivation_Level'
-        ]
+        st.session_state.selected_features = valid_defaults if valid_defaults else all_cols[:10]
+
+    # Ensure current selection only contains valid features
+    current_selection = [f for f in st.session_state.selected_features if f in all_cols]
+    if len(current_selection) != len(st.session_state.selected_features):
+        st.session_state.selected_features = current_selection
 
     # Selection
     new_selection = st.multiselect(
@@ -279,9 +290,28 @@ def render_data_exploration_page():
         return
     
     df_full = st.session_state.df_enhanced
+    
+    # Validate selected features exist in dataset
+    available_cols = df_full.columns.tolist()
     selected_features = st.session_state.selected_features
-    # Always include target
-    cols_to_show = selected_features + ['Exam_Score']
+    
+    # Filter out features that don't exist in the dataset
+    valid_features = [f for f in selected_features if f in available_cols]
+    
+    # Update session state if features were filtered
+    if len(valid_features) != len(selected_features):
+        invalid_features = [f for f in selected_features if f not in available_cols]
+        st.warning(f"⚠️ Some selected features are not in the dataset and were removed: {', '.join(invalid_features)}")
+        st.session_state.selected_features = valid_features
+        selected_features = valid_features
+    
+    # Always include target if it exists
+    if 'Exam_Score' in available_cols:
+        cols_to_show = selected_features + ['Exam_Score']
+    else:
+        cols_to_show = selected_features
+        st.error("Target column 'Exam_Score' not found in dataset!")
+    
     df = df_full[cols_to_show]
     
     # Tabs for different views
