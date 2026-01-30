@@ -5,28 +5,63 @@ import os
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
+import kagglehub
+
+def download_dataset(dataset_slug):
+    """
+    Download dataset from Kaggle using kagglehub.
+    """
+    try:
+        path = kagglehub.dataset_download(dataset_slug)
+        # Find the csv file in the path
+        for root, dirs, files in os.walk(path):
+            for file in files:
+                if file.endswith(".csv"):
+                    return os.path.join(root, file)
+    except Exception as e:
+        print(f"Error downloading dataset {dataset_slug}: {e}")
+        return None
+    return None
+
 def load_data():
     """
-    Load dataset.
-    """
-    paths = [
-        os.path.join("data", "student_performance.csv"),
-        os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "student_performance.csv")
-    ]
-    
-    path = None
-    for p in paths:
-        if os.path.exists(p):
-            path = p
-            break
-            
-    if not path:
-        raise FileNotFoundError(f"Could not find the dataset. Checked: {paths}")
+    Load data.
 
-    df = pd.read_csv(path)
-    
+    """
+    # Check for local dataset
+    local_path = os.path.join("data", "student_performance.csv")
+    if os.path.exists(local_path):
+        print(f"Loading local dataset from {local_path}...")
+        df = pd.read_csv(local_path)
+    else:
+        print("Local dataset not found. Attempting to download from Kaggle...")
+        # Download from Kaggle
+        # Dataset 1: Student Performance Factors
+        path1 = download_dataset("ayeshaseherr/student-performance")
+        # Dataset 2: Social Media Addiction vs Relationships
+        path2 = download_dataset("adilshamim8/social-media-addiction-vs-relationships")
+
+        if not path1 or not path2:
+            raise FileNotFoundError("Could not find local dataset and failed to download required datasets from Kaggle.")
+
+        # Load datasets
+        df_academic = pd.read_csv(path1)
+        df_social = pd.read_csv(path2)
+
+        # Clean column names (strip spaces)
+        df_academic.columns = df_academic.columns.str.strip()
+        df_social.columns = df_social.columns.str.strip()
+
+        # Merge datasets (index-based inner join)
+        df = pd.merge(df_academic, df_social, left_index=True, right_index=True, suffixes=('', '_social'))
+        
+        # Save merged version locally for next time
+        os.makedirs("data", exist_ok=True)
+        df.to_csv(local_path, index=False)
+        print(f"Dataset saved to {local_path}")
+
     # Drop unnamed index column if it exists
-    if df.columns[0].startswith('Unnamed'):
+    if not df.empty and df.columns[0].startswith('Unnamed'):
         df = df.drop(df.columns[0], axis=1)
         
     return clean_data(df)

@@ -14,6 +14,7 @@ import joblib
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
+from src.feature_engineering import add_all_simulated_features
 from src.data_loader import (
     load_data, clean_data, encode_categorical
 )
@@ -98,8 +99,9 @@ def load_and_prepare_data():
         try:
             df = load_data()
             df = clean_data(df)
+            df_enhanced = add_all_simulated_features(df)
             st.session_state.df = df
-            st.session_state.df_enhanced = df
+            st.session_state.df_enhanced = df_enhanced
             st.session_state.data_loaded = True
             return True
         except Exception as e:
