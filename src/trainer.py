@@ -79,17 +79,31 @@ def train_and_save_selected(df, selected_features, target_col='Exam_Score', mode
         
         # Predictions
         y_pred = pipeline.predict(X_test)
+        y_train_pred = pipeline.predict(X_train)
         
-        # Metrics
+        # Basic Metrics
         mse = mean_squared_error(y_test, y_pred)
         mae = mean_absolute_error(y_test, y_pred)
-        r2 = r2_score(y_test, y_pred)
+        r2_test = r2_score(y_test, y_pred)
+        r2_train = r2_score(y_train, y_train_pred)
         rmse = np.sqrt(mse)
         
+        # Calculate Adjusted R2
+        n = X_test.shape[0] # number of test samples
+        p = X_test.shape[1] # number of features
+        
+        # Avoid division by zero
+        if n > p + 1:
+            adj_r2 = 1 - (1 - r2_test) * (n - 1) / (n - p - 1)
+        else:
+            adj_r2 = r2_test # Fallback
+            
         evaluation_results['regression'].append({
             'Model Name': display_name,
             'model_key': name,
-            'R² Score': r2,
+            'R² Score': r2_test,
+            'Training R²': r2_train,
+            'Adjusted R²': adj_r2,
             'MAE': mae,
             'MSE': mse,
             'RMSE': rmse,
@@ -122,9 +136,11 @@ def train_and_save_selected(df, selected_features, target_col='Exam_Score', mode
         
         # Predictions
         y_pred = pipeline.predict(X_test)
+        y_train_pred = pipeline.predict(X_train)
         
         # Metrics
-        acc = accuracy_score(y_test_clf, y_pred)
+        acc_test = accuracy_score(y_test_clf, y_pred)
+        acc_train = accuracy_score(y_train_clf, y_train_pred)
         prec = precision_score(y_test_clf, y_pred, zero_division=0)
         rec = recall_score(y_test_clf, y_pred, zero_division=0)
         f1 = f1_score(y_test_clf, y_pred, zero_division=0)
@@ -133,7 +149,8 @@ def train_and_save_selected(df, selected_features, target_col='Exam_Score', mode
         evaluation_results['classification'].append({
             'Model Name': display_name,
             'model_key': name,
-            'Accuracy': acc,
+            'Accuracy': acc_test,
+            'Training Accuracy': acc_train,
             'Precision': prec,
             'Recall': rec,
             'F1 Score': f1,

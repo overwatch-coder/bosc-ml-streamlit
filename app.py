@@ -595,7 +595,12 @@ def render_model_training_page():
             if eval_results.get('regression'):
                 # Create DataFrame
                 reg_df = pd.DataFrame(eval_results['regression'])
-                reg_display = reg_df[['Model Name', 'R² Score', 'MAE', 'MSE', 'RMSE']].copy()
+                cols_to_show = ['Model Name', 'R² Score']
+                # if 'Training R²' in reg_df.columns: cols_to_show.append('Training R²')
+                # if 'Adjusted R²' in reg_df.columns: cols_to_show.append('Adjusted R²')
+                cols_to_show.extend(['MAE', 'MSE', 'RMSE'])
+                
+                reg_display = reg_df[cols_to_show].copy()
                 
                 # Transpose for better comparison
                 reg_display_t = reg_display.set_index('Model Name').T
@@ -608,7 +613,25 @@ def render_model_training_page():
                         best_val = row.max()
                     return ['background-color: rgba(0, 255, 0, 0.3)' if v == best_val else '' for v in row]
                 
-                st.dataframe(reg_display_t.style.apply(highlight_best_reg, axis=1).format(precision=4), use_container_width=True)
+                st.table(reg_display_t.style.apply(highlight_best_reg, axis=1).format(precision=4))
+                
+                # Model Interpretation Notes
+                # st.markdown("#### 💡 Key Insights for Model Selection")
+                # col_insight1, col_insight2 = st.columns(2)
+                
+                # with col_insight1:
+                #     st.info("""
+                #     **1. Underfitting vs. Overfitting**
+                #     *   **Underfitting:** A low $R^2$ on both training and testing sets indicates the model is too simple to capture the patterns.
+                #     *   **Overfitting:** A high training $R^2$ but low testing $R^2$ suggests the model is "memorizing" noise rather than learning general trends.
+                #     """)
+                
+                # with col_insight2:
+                #     st.warning("""
+                #     **2. The $R^2$ Reality Check**
+                #     *   $R^2$ doesn't guarantee the model is "correct"—even a high $R^2$ can hide systematic errors.
+                #     *   It can increase falsely when adding useless features. This is why **Adjusted R-squared** is often preferred for complex models.
+                #     """)
                 
                 # Visualizations
                 col1, col2 = st.columns(2)
@@ -643,7 +666,11 @@ def render_model_training_page():
             if eval_results.get('classification'):
                 # Create DataFrame
                 clf_df = pd.DataFrame(eval_results['classification'])
-                clf_display = clf_df[['Model Name', 'Accuracy', 'Precision', 'Recall', 'F1 Score']].copy()
+                cols_to_show = ['Model Name', 'Accuracy']
+                # if 'Training Accuracy' in clf_df.columns: cols_to_show.append('Training Accuracy')
+                cols_to_show.extend(['Precision', 'Recall', 'F1 Score'])
+                
+                clf_display = clf_df[cols_to_show].copy()
                 
                 # Transpose
                 clf_display_t = clf_display.set_index('Model Name').T
@@ -652,7 +679,7 @@ def render_model_training_page():
                     best_val = row.max()
                     return ['background-color: rgba(0, 255, 0, 0.3)' if v == best_val else '' for v in row]
                 
-                st.dataframe(clf_display_t.style.apply(highlight_best_clf, axis=1).format(precision=4), use_container_width=True)
+                st.table(clf_display_t.style.apply(highlight_best_clf, axis=1).format(precision=4))
                 
                 # Visualizations
                 col1, col2 = st.columns(2)
@@ -1034,7 +1061,6 @@ def render_predictions_page():
     st.info("Enter student information below to predict performance.")
     
     # Create input form based on trained features
-    # We use metadata['feature_names'] to ensure we match the model's expected input
     feature_names = metadata['feature_names']
     categorical_features = metadata.get('categorical_features', [])
     
@@ -1087,10 +1113,10 @@ def render_predictions_page():
                     # Numerical: Number input with flexible ranges
                     if col in df_full.columns:
                         # Get statistics from full dataset
-                        col_min = float(df_full[col].min())
-                        col_max = float(df_full[col].max())
                         col_median = float(df_full[col].median())
                         col_std = float(df_full[col].std())
+                        col_min = float(df_full[col].min())
+                        col_max = float(df_full[col].max())
                         
                         # Set flexible bounds for help text
                         flexible_min = max(0, col_min - 2 * col_std)
@@ -1122,184 +1148,139 @@ def render_predictions_page():
         
     if predict_btn:
         try:
-            # Load the selected model
-            model_path = f"models/{selected_model_name}.pkl"
-            if not os.path.exists(model_path):
-                st.error(f"Model file not found: {model_path}")
+            # Load evaluation results and metadata
+            if not os.path.exists("models/evaluation_results.pkl") or not os.path.exists("models/metadata.pkl"):
+                st.error("Model data not found. Please train models first.")
                 return
-                
-            pipeline = joblib.load(model_path)
+            
+            eval_results = joblib.load("models/evaluation_results.pkl")
+            metadata = joblib.load("models/metadata.pkl")
+            pass_thresh = metadata.get('pass_threshold', 60)
+            
+            # Model dictionaries
+            reg_models = {
+                'linear_regression': 'Linear Regression',
+                'random_forest_regressor': 'Random Forest',
+                'mlp_regressor': 'Neural Network (MLP)'
+            }
+            
+            clf_models = {
+                'logistic_regression': 'Logistic Regression',
+                'random_forest_classifier': 'Random Forest',
+                'knn': 'K-Nearest Neighbors',
+                'svm': 'SVM',
+                'mlp_classifier': 'Neural Network (MLP)'
+            }
             
             # Create DataFrame for prediction
             input_df = pd.DataFrame([input_data])
             
-            # Predict
-            prediction = pipeline.predict(input_df)
+            # 1. Detailed Prediction Analysis (Using selected model or best models)
+            st.markdown("### 🎯 Detailed Prediction Analysis")
             
-            st.markdown("---")
-            st.markdown("### 🔮 Prediction Result")
+            # Logic: Show results for the specific model type the user focused on, 
+            # and use the best overall models for the alternate view.
             
-            col1, col2 = st.columns(2)
+            best_reg = pd.DataFrame(eval_results.get('regression', [])).sort_values('R² Score', ascending=False).iloc[0] if eval_results.get('regression') else None
+            best_clf = pd.DataFrame(eval_results.get('classification', [])).sort_values('Accuracy', ascending=False).iloc[0] if eval_results.get('classification') else None
             
-            with col1:
-                st.markdown(f"**Selected Model:** `{selected_display}`")
+            # Determine which keys to use for the detailed metrics
+            # If current selection is regression, use it for score. If classification, use it for status.
+            target_reg_key = selected_model_name if model_type == 'regression' else (best_reg['model_key'] if best_reg is not None else None)
+            target_clf_key = selected_model_name if model_type == 'classification' else (best_clf['model_key'] if best_clf is not None else None)
+            
+            if target_reg_key and target_clf_key:
+                reg_pipeline = joblib.load(f"models/{target_reg_key}.pkl")
+                clf_pipeline = joblib.load(f"models/{target_clf_key}.pkl")
                 
-                if model_type == "regression":
-                    score = prediction[0]
-                    st.metric("Predicted Exam Score", f"{score:.2f}")
-                    
-                    # Load metadata to get pass threshold
-                    metadata = joblib.load("models/metadata.pkl")
-                    pass_thresh = metadata.get('pass_threshold', 60)
-                    
-                    if score >= pass_thresh:
-                        st.success(f"Result: PASS 🎉 (threshold: {pass_thresh}%)")
-                    else:
-                        st.error(f"Result: FAIL ⚠️ (threshold: {pass_thresh}%)")
-                else:
-                    result = prediction[0]
-                    # Classification returns 0 or 1
-                    status = "PASS 🎉" if result == 1 else "FAIL ⚠️"
-                    st.metric("Predicted Status", status)
-                    
-                    # If model supports probability
-                    if hasattr(pipeline.named_steps.get('classifier', pipeline.named_steps.get('regressor')), 'predict_proba'):
-                        probs = pipeline.predict_proba(input_df)
-                        confidence = np.max(probs) * 100
-                        st.caption(f"Confidence: {confidence:.1f}%")
+                score_pred = reg_pipeline.predict(input_df)[0]
+                pass_pred = clf_pipeline.predict(input_df)[0]
+                
+                # Display metrics
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("Predicted Exam Score", f"{score_pred:.1f}")
+                    reg_name = reg_models.get(target_reg_key, target_reg_key)
+                    reg_eval = next((m for m in eval_results.get('regression', []) if m['model_key'] == target_reg_key), None)
+                    if reg_eval:
+                        rel = reg_eval['R² Score'] * 100
+                        st.caption(f"📊 Accuracy ({reg_name}): {max(0, rel):.1f}%")
+                
+                with col2:
+                    status = "Pass ✅" if pass_pred == 1 else "Fail ❌"
+                    st.metric("Pass/Fail Prediction", status)
+                    clf_name = clf_models.get(target_clf_key, target_clf_key)
+                    clf_eval = next((m for m in eval_results.get('classification', []) if m['model_key'] == target_clf_key), None)
+                    if clf_eval:
+                        prec = clf_eval['Precision'] * 100
+                        st.caption(f"🎯 Precision ({clf_name}): {prec:.1f}%")
+                
+                with col3:
+                    # Grade logic
+                    if score_pred >= 90: grade = "A"
+                    elif score_pred >= 80: grade = "B"
+                    elif score_pred >= 70: grade = "C"
+                    elif score_pred >= 60: grade = "D"
+                    else: grade = "F"
+                    st.metric("Predicted Grade", grade)
+                    st.caption("Based on standard GPA scale")
 
-            with col2:
-                # Show key influencing factors (if linear/logistic)
-                st.info("Input Summary")
-                st.json(input_data)
-            
-            # Model Comparison Section
+            # 2. Strategic Insights
             st.markdown("---")
-            st.markdown("### 📊 Model Comparison & Performance")
+            st.markdown("### 💡 Strategic Insights")
+            insights = []
+            if 'Hours_Studied' in input_data and input_data['Hours_Studied'] < 3:
+                insights.append("⚠️ Low study hours detected. Increasing focus blocks could boost your score.")
+            if 'Attendance' in input_data and input_data['Attendance'] < 75:
+                insights.append("📅 Low attendance is a high-risk factor for exam failure.")
+            if 'Sleep_Hours' in input_data and input_data['Sleep_Hours'] < 6:
+                insights.append("😴 Lack of sleep significantly impairs cognitive recall during exams.")
+            if 'Social_Media_Hours' in input_data and input_data['Social_Media_Hours'] > 4:
+                insights.append("📱 High social media usage may be impacting study time and focus.")
+            if 'mental_health_rating' in input_data and input_data['mental_health_rating'] <= 2:
+                insights.append("🧘 Low mental health rating detected. Consider seeking support services.")
             
-            # Load evaluation results
-            if os.path.exists("models/evaluation_results.pkl"):
-                eval_results = joblib.load("models/evaluation_results.pkl")
-                
-                # Create tabs for regression and classification comparisons
-                comp_tab1, comp_tab2 = st.tabs(["📉 All Regression Models", "🏷️ All Classification Models"])
-                
-                with comp_tab1:
-                    st.markdown("#### Regression Models - Predictions & Accuracy")
-                    
-                    reg_predictions = []
-                    for model_info in eval_results.get('regression', []):
-                        model_key = model_info['model_key']
-                        model_name = model_info['Model Name']
-                        
-                        # Load and predict with this model
-                        try:
-                            model_pipeline = joblib.load(f"models/{model_key}.pkl")
-                            pred = model_pipeline.predict(input_df)[0]
-                            
-                            reg_predictions.append({
-                                'Model': model_name,
-                                'Predicted Score': f"{pred:.2f}",
-                                'R² Score': f"{model_info['R² Score']:.4f}",
-                                'MAE': f"{model_info['MAE']:.2f}",
-                                'RMSE': f"{model_info['RMSE']:.2f}"
-                            })
-                        except:
-                            pass
-                    
-                    if reg_predictions:
-                        reg_df = pd.DataFrame(reg_predictions)
-                        
-                        # Highlight the selected model
-                        def highlight_selected(row):
-                            if selected_model_name in ['linear_regression', 'random_forest_regressor', 'mlp_regressor']:
-                                selected_name = [m['Model Name'] for m in eval_results['regression'] if m['model_key'] == selected_model_name][0]
-                                if row['Model'] == selected_name:
-                                    return ['background-color: rgba(0, 123, 255, 0.2)'] * len(row)
-                            return [''] * len(row)
-                        
-                        st.dataframe(reg_df.style.apply(highlight_selected, axis=1), use_container_width=True)
-                        
-                        st.caption("💡 The highlighted row shows your currently selected model. R² closer to 1.0 indicates better accuracy.")
-                
-                with comp_tab2:
-                    st.markdown("#### Classification Models - Predictions & Accuracy")
-                    
-                    clf_predictions = []
-                    for model_info in eval_results.get('classification', []):
-                        model_key = model_info['model_key']
-                        model_name = model_info['Model Name']
-                        
-                        # Load and predict with this model
-                        try:
-                            model_pipeline = joblib.load(f"models/{model_key}.pkl")
-                            pred = model_pipeline.predict(input_df)[0]
-                            status = "PASS ✅" if pred == 1 else "FAIL ❌"
-                            
-                            clf_predictions.append({
-                                'Model': model_name,
-                                'Prediction': status,
-                                'Accuracy': f"{model_info['Accuracy']:.4f}",
-                                'Precision': f"{model_info['Precision']:.4f}",
-                                'Recall': f"{model_info['Recall']:.4f}",
-                                'F1 Score': f"{model_info['F1 Score']:.4f}"
-                            })
-                        except:
-                            pass
-                    
-                    if clf_predictions:
-                        clf_df = pd.DataFrame(clf_predictions)
-                        
-                        # Highlight the selected model
-                        def highlight_selected_clf(row):
-                            if selected_model_name in ['logistic_regression', 'random_forest_classifier', 'knn', 'svm', 'mlp_classifier']:
-                                selected_name = [m['Model Name'] for m in eval_results['classification'] if m['model_key'] == selected_model_name][0]
-                                if row['Model'] == selected_name:
-                                    return ['background-color: rgba(0, 123, 255, 0.2)'] * len(row)
-                            return [''] * len(row)
-                        
-                        st.dataframe(clf_df.style.apply(highlight_selected_clf, axis=1), use_container_width=True)
-                        
-                        st.caption("💡 The highlighted row shows your currently selected model. Higher accuracy/F1 scores indicate better performance.")
-                
-                # Consensus Analysis
-                st.markdown("---")
-                st.markdown("### 🎯 Model Consensus Analysis")
-                
-                if model_type == "regression" and reg_predictions:
-                    scores = [float(p['Predicted Score']) for p in reg_predictions]
-                    avg_score = np.mean(scores)
-                    std_score = np.std(scores)
-                    
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("Average Prediction", f"{avg_score:.2f}")
-                    with col2:
-                        st.metric("Prediction Range", f"±{std_score:.2f}")
-                    with col3:
-                        agreement = "High" if std_score < 5 else ("Medium" if std_score < 10 else "Low")
-                        st.metric("Model Agreement", agreement)
-                    
-                    st.info(f"📊 All regression models predict an average score of **{avg_score:.1f}** with a standard deviation of **{std_score:.1f}**. Lower deviation indicates higher agreement between models.")
-                
-                elif model_type == "classification" and clf_predictions:
-                    pass_count = sum(1 for p in clf_predictions if "PASS" in p['Prediction'])
-                    fail_count = len(clf_predictions) - pass_count
-                    consensus = "PASS ✅" if pass_count > fail_count else "FAIL ❌"
-                    confidence = max(pass_count, fail_count) / len(clf_predictions) * 100
-                    
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("Consensus Prediction", consensus)
-                    with col2:
-                        st.metric("Models Agreeing", f"{max(pass_count, fail_count)}/{len(clf_predictions)}")
-                    with col3:
-                        st.metric("Consensus Confidence", f"{confidence:.0f}%")
-                    
-                    st.info(f"📊 **{pass_count}** models predict PASS, **{fail_count}** predict FAIL. The consensus is **{consensus}** with **{confidence:.0f}%** agreement.")
+            if insights:
+                for ins in insights: st.write(f"- {ins}")
             else:
-                st.warning("Model evaluation results not found. Please retrain models to see comparison metrics.")
-                
+                st.success("✨ Good habit balance detected! Keep it up.")
+            
+
+            # 3. Model Consensus & Comparison
+            st.markdown("---")
+            st.markdown("### 📊 Model Comparison & Consensus")
+            
+            all_preds = []
+            # Gather all predictions
+            for m_key, m_name in reg_models.items():
+                if os.path.exists(f"models/{m_key}.pkl"):
+                    pipe = joblib.load(f"models/{m_key}.pkl")
+                    p = pipe.predict(input_df)[0]
+                    eval_info = next((m for m in eval_results.get('regression', []) if m['model_key'] == m_key), None)
+                    if eval_info:
+                        all_preds.append({
+                            'Type': 'Score Prediction',
+                            'Model': m_name,
+                            'Prediction': f"{p:.1f}",
+                            'Reliability (Accuracy)': f"{max(0, eval_info['R² Score']*100):.1f}%"
+                        })
+            
+            for m_key, m_name in clf_models.items():
+                if os.path.exists(f"models/{m_key}.pkl"):
+                    pipe = joblib.load(f"models/{m_key}.pkl")
+                    p = pipe.predict(input_df)[0]
+                    eval_info = next((m for m in eval_results.get('classification', []) if m['model_key'] == m_key), None)
+                    if eval_info:
+                        all_preds.append({
+                            'Type': 'Pass/Fail Status',
+                            'Model': m_name,
+                            'Prediction': "Pass ✅" if p == 1 else "Fail ❌",
+                            'Reliability (Precision)': f"{eval_info['Precision']*100:.1f}%"
+                        })
+            
+            st.table(pd.DataFrame(all_preds))
+            
         except Exception as e:
             st.error(f"Prediction Error: {e}")
             import traceback
